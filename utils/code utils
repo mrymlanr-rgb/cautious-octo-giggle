@@ -1,0 +1,142 @@
+import sys
+import io
+import contextlib
+import traceback
+import time
+
+class CodeExecutor:
+    def __init__(self):
+        self.max_execution_time = 5  # Maximum execution time in seconds
+        
+    def execute_code(self, code):
+        """
+        Execute Python code safely and return the output, errors, and execution time.
+        """
+        # Capture stdout and stderr
+        stdout_capture = io.StringIO()
+        stderr_capture = io.StringIO()
+        
+        # Store original stdout and stderr
+        original_stdout = sys.stdout
+        original_stderr = sys.stderr
+        
+        # Record start time
+        start_time = time.time()
+        
+        try:
+            # Redirect output
+            sys.stdout = stdout_capture
+            sys.stderr = stderr_capture
+            
+            # Create a restricted globals dictionary
+            restricted_globals = {
+                '__builtins__': {
+                    'print': print,
+                    'len': len,
+                    'str': str,
+                    'int': int,
+                    'float': float,
+                    'bool': bool,
+                    'list': list,
+                    'dict': dict,
+                    'tuple': tuple,
+                    'set': set,
+                    'range': range,
+                    'enumerate': enumerate,
+                    'zip': zip,
+                    'type': type,
+                    'abs': abs,
+                    'round': round,
+                    'min': min,
+                    'max': max,
+                    'sum': sum,
+                    'sorted': sorted,
+                    'input': self._safe_input,
+                    'isinstance': isinstance,
+                    'ValueError': ValueError,
+                    'TypeError': TypeError,
+                    'IndexError': IndexError,
+                    'KeyError': KeyError,
+                }
+            }
+            
+            # Execute the code
+            exec(code, restricted_globals)
+            
+            # Calculate execution time
+            execution_time = time.time() - start_time
+            
+            # Get output
+            output = stdout_capture.getvalue()
+            error = stderr_capture.getvalue()
+            
+            return {
+                'success': True,
+                'output': output,
+                'error': error,
+                'execution_time': execution_time
+            }
+            
+        except Exception as e:
+            # Calculate execution time even for errors
+            execution_time = time.time() - start_time
+            
+            # Get the traceback
+            error_traceback = traceback.format_exc()
+            
+            return {
+                'success': False,
+                'output': stdout_capture.getvalue(),
+                'error': self._format_error(error_traceback),
+                'execution_time': execution_time
+            }
+            
+        finally:
+            # Restore original stdout and stderr
+            sys.stdout = original_stdout
+            sys.stderr = original_stderr
+    
+    def _safe_input(self, prompt=""):
+        """
+        Safe input function that returns a predetermined value
+        """
+        return "test_input"
+    
+    def _format_error(self, error_traceback):
+        """
+        Format error messages to be more user-friendly in Arabic
+        """
+        if "SyntaxError" in error_traceback:
+            return "خطأ في الصيغة: تحقق من كتابة الكود بشكل صحيح"
+        elif "NameError" in error_traceback:
+            return "خطأ في الاسم: متغير أو دالة غير معرفة"
+        elif "TypeError" in error_traceback:
+            return "خطأ في النوع: تحقق من أنواع البيانات المستخدمة"
+        elif "IndexError" in error_traceback:
+            return "خطأ في الفهرس: محاولة الوصول لعنصر غير موجود"
+        elif "ValueError" in error_traceback:
+            return "خطأ في القيمة: قيمة غير صالحة للعملية المطلوبة"
+        elif "IndentationError" in error_traceback:
+            return "خطأ في المسافات: تحقق من المسافات في بداية الأسطر"
+        else:
+            # Return the last line of the traceback which usually contains the error
+            lines = error_traceback.strip().split('\n')
+            return lines[-1] if lines else "خطأ غير معروف"
+    
+    def validate_code(self, code):
+        """
+        Validate code before execution
+        """
+        # Check for potentially dangerous operations
+        dangerous_keywords = ['import os', 'import sys', 'import subprocess', 
+                             'exec(', 'eval(', '__import__', 'open(', 'file(']
+        
+        for keyword in dangerous_keywords:
+            if keyword in code:
+                return False, f"الكود يحتوي على عملية غير مسموحة: {keyword}"
+        
+        # Check for infinite loops (basic check)
+        if 'while True:' in code and 'break' not in code:
+            return False, "احذر من الحلقات اللانهائية! تأكد من وجود شرط للخروج"
+        
+        return True, "الكود آمن للتنفيذ"
