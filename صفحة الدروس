@@ -1,0 +1,196 @@
+import streamlit as st
+import json
+from streamlit_ace import st_ace
+from utils.code_executor import CodeExecutor
+from utils.progress_tracker import ProgressTracker
+
+# Page configuration
+st.set_page_config(page_title="الدروس", page_icon="📚", layout="wide")
+
+# Initialize utilities
+@st.cache_data
+def load_lessons():
+    with open('lessons/lessons_data.json', 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+if 'code_executor' not in st.session_state:
+    st.session_state.code_executor = CodeExecutor()
+
+if 'progress_tracker' not in st.session_state:
+    st.session_state.progress_tracker = ProgressTracker()
+
+# Load lessons data
+lessons_data = load_lessons()
+lessons = lessons_data['lessons']
+
+st.title("📚 الدروس التعليمية")
+
+# Sidebar for lesson navigation
+st.sidebar.title("قائمة الدروس")
+lesson_titles = [f"{lesson['id']}. {lesson['title']}" for lesson in lessons]
+selected_lesson_index = st.sidebar.selectbox(
+    "اختر درس:",
+    range(len(lesson_titles)),
+    format_func=lambda x: lesson_titles[x]
+)
+
+# Get selected lesson
+selected_lesson = lessons[selected_lesson_index]
+lesson_id = selected_lesson['id']
+
+# Progress indicator
+progress = st.session_state.progress_tracker.get_overall_progress()
+st.sidebar.metric("نسبة الإنجاز الإجمالي", f"{progress:.1f}%")
+
+# Lesson completion status
+is_completed = st.session_state.progress_tracker.is_lesson_completed(lesson_id)
+if is_completed:
+    st.sidebar.success("✅ تم إكمال هذا الدرس")
+else:
+    st.sidebar.info("⏳ لم يكتمل بعد")
+
+# Main content
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    # Lesson header
+    st.header(f"درس {selected_lesson['id']}: {selected_lesson['title']}")
+    st.badge(selected_lesson['level'], type="secondary")
+    st.write(selected_lesson['description'])
+    
+    # Theory section
+    st.subheader("📖 الشرح النظري")
+    st.write(selected_lesson['content']['theory'])
+    
+    # Code example section
+    st.subheader("💻 مثال عملي")
+    st.code(selected_lesson['content']['example'], language='python')
+    
+    # Explanation
+    st.subheader("📝 شرح الكود")
+    st.write(selected_lesson['content']['explanation'])
+    
+    # Interactive code editor
+    st.subheader("🧪 جرب الكود بنفسك")
+    st.write("يمكنك تعديل الكود أدناه وتجربته:")
+    
+    # Code editor
+    user_code = st_ace(
+        value=selected_lesson['content']['example'],
+        language='python',
+        theme='github',
+        font_size=14,
+        tab_size=4,
+        wrap=True,
+        height=200,
+        key=f"lesson_{lesson_id}_editor"
+    )
+    
+    # Execute button
+    col_exec, col_clear = st.columns([1, 1])
+    
+    with col_exec:
+        if st.button("▶️ تشغيل الكود", type="primary"):
+            if user_code.strip():
+                # Validate and execute code
+                is_valid, validation_msg = st.session_state.code_executor.validate_code(user_code)
+                
+                if is_valid:
+                    with st.spinner("جاري تشغيل الكود..."):
+                        result = st.session_state.code_executor.execute_code(user_code)
+                        st.session_state.progress_tracker.increment_code_runs()
+                    
+                    if result['success']:
+                        st.success("تم تشغيل الكود بنجاح!")
+                        if result['output']:
+                            st.subheader("📤 النتيجة:")
+                            st.code(result['output'], language='text')
+                        st.info(f"وقت التنفيذ: {result['execution_time']:.3f} ثانية")
+                    else:
+                        st.error("حدث خطأ أثناء تشغيل الكود:")
+                        st.code(result['error'], language='text')
+                else:
+                    st.error(validation_msg)
+            else:
+                st.warning("الرجاء كتابة بعض الكود أولاً")
+    
+    with col_clear:
+        if st.button("🗑️ مسح الكود"):
+            st.rerun()
+
+with col2:
+    # Quiz section
+    st.subheader("🎯 اختبار سريع")
+    quiz = selected_lesson['quiz']
+    
+    st.write(quiz['question'])
+    
+    # Quiz options
+    user_answer = st.radio(
+        "اختر الإجابة الصحيحة:",
+        range(len(quiz['options'])),
+        format_func=lambda x: quiz['options'][x],
+        key=f"quiz_{lesson_id}"
+    )
+    
+    if st.button("تحقق من الإجابة", key=f"check_quiz_{lesson_id}"):
+        if user_answer == quiz['correct']:
+            st.success("🎉 إجابة صحيحة! أحسنت!")
+            st.session_state.progress_tracker.save_quiz_score(lesson_id, 1)
+            if not is_completed:
+                st.session_state.progress_tracker.mark_lesson_completed(lesson_id)
+                st.success("🏆 تهانينا! لقد أكملت هذا الدرس!")
+                st.balloons()
+                st.rerun()
+        else:
+            st.error("❌ إجابة خاطئة. حاول مرة أخرى!")
+            correct_answer = quiz['options'][quiz['correct']]
+            st.info(f"الإجابة الصحيحة هي: {correct_answer}")
+    
+    # Previous quiz score
+    quiz_score = st.session_state.progress_tracker.get_quiz_score(lesson_id)
+    if quiz_score > 0:
+        st.success("✅ أجبت على الاختبار بشكل صحيح من قبل")
+    
+    # Lesson navigation
+    st.subheader("🧭 التنقل")
+    
+    col_prev, col_next = st.columns(2)
+    
+    with col_prev:
+        if lesson_id > 1:
+            if st.button("⬅️ الدرس السابق"):
+                st.switch_page("pages/1_الدروس.py")
+        else:
+            st.write("هذا أول درس")
+    
+    with col_next:
+        if lesson_id < len(lessons):
+            if st.button("➡️ الدرس التالي"):
+                st.switch_page("pages/1_الدروس.py")
+        else:
+            st.write("هذا آخر درس")
+    
+    # Additional resources
+    st.subheader("📚 موارد إضافية")
+    st.write("نصائح للممارسة:")
+    st.write("• جرب تعديل الأمثلة")
+    st.write("• اكتب أكواد مشابهة")
+    st.write("• تأكد من فهم كل سطر")
+    st.write("• لا تتردد في العودة للدرس")
+
+# Footer
+st.markdown("---")
+col_foot1, col_foot2, col_foot3 = st.columns(3)
+
+with col_foot1:
+    if st.button("🏠 الصفحة الرئيسية"):
+        st.switch_page("app.py")
+
+with col_foot2:
+    if st.button("🎮 ملعب الكود"):
+        st.switch_page("pages/2_ملعب_الكود.py")
+
+with col_foot3:
+    if st.button("📊 التقدم"):
+        st.switch_page("pages/4_التقدم.py")
